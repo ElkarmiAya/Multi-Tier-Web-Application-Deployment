@@ -1,0 +1,160 @@
+---
+- name: Deploy Database Server
+  hosts: databases
+  become: yes
+  tasks:
+    - name: Install PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+        update_cache: yes
+
+    - name: Install Python PostgreSQL adapter
+      apt:
+        name: python3-psycopg2
+        state: present
+
+    - name: Ensure PostgreSQL is running
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Create application database
+      become_user: postgres
+      postgresql_db:
+        name: appdb
+        state: present
+
+    - name: Create database user
+      become_user: postgres
+      postgresql_user:
+        name: appuser
+        password: apppass
+        priv: "appdb:ALL"
+        state: present
+
+    - name: Configure PostgreSQL to listen on all interfaces
+      lineinfile:
+        path: /etc/postgresql/14/main/postgresql.conf
+        regexp: '^#?listen_addresses'
+        line: "listen_addresses = '*'"
+      notify: restart postgresql
+
+    - name: Allow connections from app server
+      lineinfile:
+        path: /etc/postgresql/14/main/pg_hba.conf
+        line: "host    all    all    0.0.0.0/0    md5"
+      notify: restart postgresql
+
+  handlers:
+    - name: restart postgresql
+      service:
+        name: postgresql
+        state: restarted
+
+- name: Deploy Application Server
+  hosts: appservers
+  become: yes
+  vars:
+    app_dir: /opt/myapp
+    db_host: db
+  tasks:
+    - name: Install Python and pip
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+        update_cache: yes
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ansible
+        group: ansible
+
+    - name: Copy Flask application
+      copy:
+        src: files/app.py
+        dest: "{{ app_dir }}/app.py"
+        owner: ansible
+        group: ansible
+
+    - name: Copy requirements.txt
+      copy:
+        src: files/requirements.txt
+        dest: "{{ app_dir }}/requirements.txt"
+        owner: ansible
+        group: ansible
+
+    - name: Install Python packages
+      pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_command: python3 -m venv
+
+    - name: Create systemd service file
+      template:
+        src: templates/flask-app.service.j2
+        dest: /etc/systemd/system/flask-app.service
+      notify: restart flask app
+
+    - name: Enable and start Flask application
+      systemd:
+        name: flask-app
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+  handlers:
+    - name: restart flask app
+      systemd:
+        name: flask-app
+        state: restarted
+        daemon_reload: yes
+
+- name: Deploy Web Server
+  hosts: webservers
+  become: yes
+  vars:
+    app_server: app
+  tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Create Nginx configuration
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/myapp
+      notify: restart nginx
+
+    - name: Enable site configuration
+      file:
+        src: /etc/nginx/sites-available/myapp
+        dest: /etc/nginx/sites-enabled/myapp
+        state: link
+      notify: restart nginx
+
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: restart nginx
+
+    - name: Ensure Nginx is running
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
