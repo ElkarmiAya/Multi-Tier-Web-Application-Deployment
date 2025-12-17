@@ -1,0 +1,14 @@
+[Unit]
+Description=Flask Application
+After=network.target
+
+[Service]
+User=ansible
+WorkingDirectory={{ app_dir }}
+Environment="PATH={{ app_dir }}/venv/bin"
+Environment="DB_HOST={{ db_host }}"
+ExecStart={{ app_dir }}/venv/bin/python {{ app_dir }}/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

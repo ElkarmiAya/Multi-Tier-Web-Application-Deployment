@@ -1,0 +1,18 @@
+FROM ubuntu:20.04
+#installer ssh dans les conteneurs
+RUN apt-get update && \
+    apt-get install -y openssh-server python3 sudo &&\
+    apt-get clean
+#création du dossier sshd nécessaire pour ssh
+RUN mkdir /var/run/sshd
+#Définir le mot de pass de l'utilisateur root, nécessaire pour la connexion ssh
+RUN echo 'root:ansible' | chpasswd
+#Modifier la configuration ssh pour autoriser la connexion ssh 
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+#Création de l'utilisateur ansible pour des raison de securité
+RUN useradd -m -s /bin/bash ansible && \
+    echo 'ansible:ansible' | chpasswd &&\
+    echo 'ansible ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]
